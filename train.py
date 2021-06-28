@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+#-*- coding:utf-8 -*-
+import sys
+import argparse
+import datetime
+import logging as log
+import numpy as np
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+
+from luna_model import LunaModel
+from luna_dataset import LunaDataset
+from utils import enumerateWithEstimate
+
+
+METRICS_LABEL_NDX = 0
+METRICS_PRED_NDX  = 1
+METRICS_LOSS_NDX  = 2
+METRICS_SIZE = 3
+
+class LunaTrainingApp:
+    def __init__(self, sys_argv=None):
+        self.use_cuda  = torch.cuda.is_available()
+        self.device    = torch.device("cuda" if self.use_cuda else "cpu")
+        self.model     = self.initModel()
+        self.optimizer = self.initOptimizer()
+
+        if sys_argv is None:
+            # get command line string
+            sys_argv = sys.argv[1:]
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--num-workers', help='Number of worker processes for background data loading', default =  8, type=int,)
+        parser.add_argument('--batch-size' , help='Batch size to use for training'                        , default = 32, type=int,)
+        parser.add_argument('--epochs'     , help='Number of epochs to train for'                         , default =  1, type=int,)
+
+        self.cli_args = parser.parse_args(sys_argv)
+        self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
+
+    def initModel(self):
+        model = LunaModel()
+        if self.use_cuda:
+            log.info("Using CUDA; {} devices".format(torch.cuda.device_count()))
+            if torch.cuda.device_count() > 1:
+                model = nn.DataParallel(model)
+            model = model.to(self.device)
+        return model
+
+    def initDataLoader(self, isValSet_bool=False):
+        ds = LunaDataset(val_stride=10, isValSet_bool=isValSet_bool,)
+        batch_size = self.cli_args.batch_size
+        if self.use_cuda:
+            batch_size *= torch.cuda.device_count()
+        dl = DataLoader(ds, batch_size=batch_size, num_workers=self.cli_args.num_workers, pin_memory=self.use_cuda,)
+        return dl
+
+    def initOptimizer(self):
+        return optim.SGD(self.model.parameters(), lr = 0.001, momentum=0.99)
+
+    def doTraining(self, epoch_ndx, train_dl):
+        # Change training mode
+        self.model.train()
+        trainMetrics_g = torch.zeros(METRICS_SIZE, len(train_dl.dataset), device=self.device)
+
+        batch_iter = enumerateWithEstimate(train_dl, "E{} Training".format(epoch_ndx), start_ndx=train_dl.num_workers,)
+
+        for batch_ndx, batch_tup in batch_iter:
+            self.optimizer.zero_grad()
+            loss_var = self.computeBatchLoss(batch_ndx, batch_tup, train_dl.batch_size, trainMetrics_g)
+            loss_var.backward()
+            self.optimizer.step()
+        self.toralTrainingSamples_count += len(train_dl.dataset)
+        return trainMetrics_g.to('cpu')
+
+    def doValidation(self, epoch_ndx, val_dl):
+        # Change training mode
+        with torch.no_grad():
+            self.model.eval()
+            valMetrics_g = torch.zeros(METRICS_SIZE, len(val_dl.dataset), device=self.device)
+
+            batch_iter = enumerateWithEstimate(val_dl, "E{} Validation".format(epoch_ndx), start_ndx=val_dl.num_workers,)
+
+            # Validationなので推論のみ。ロスの計算と逆伝搬は行わない
+            for batch_ndx, batch_tup in batch_iter:
+                # 平均損失は使わない
+                _ = self.computeBatchLoss(batch_ndx, batch_tup, val_dl.batch_size, valMetrics_g)
+
+        return valMetrics_g.to('cpu')
+
+
+    def computeBatchLoss(self, batch_ndx, batch_tup, batch_size, metrics_g):
+        input_t, label_t, _series_list, _center_list = batch_tup
+
+        input_g = input_t.to(self.device, non_blocking=True)
+        label_g = label_t.to(self.device, non_blocking=True)
+
+        logits_g, probability_g = self.model(input_g)
+
+        loss_func = nn.CrossEntropyLoss(reduction='none')
+        loss_g    = loss_func(logits_g, label_g[:,1],)
+
+        start_ndx = batch_ndx * batch_size
+        end_ndx   = start_ndx + label_t.size(0)
+
+        metrics_g[METRICS_LABEL_NDX, start_ndx:end_ndx] = label_g[:,1].detach()
+        metrics_g[METRICS_PRED_NDX , start_ndx:end_ndx] = probability_g[:,1].detach()
+        metrics_g[METRICS_LOSS_NDX , start_ndx:end_ndx] = loss_g.detach()
+
+        #ワンバッチごとに平均化
+        return loss_g.mean()
+
+    def logMetrics(self, epoch_ndx, mode_str, metrics_t, classificationThreshold=0.5):
+        negLabel_mask = metrics_t[METRICS_LABEL_NDX] <= classificationThreshold
+        negPred_mask  = metrics_t[METRICS_PRED_NDX]  <= classificationThreshold
+
+        posLabel_mask = ~negLabel_mask
+        posPred_mask  = ~negPred_mask
+
+        neg_count = int(negLabel_mask.sum())
+        pos_count = int(posLabel_mask.sum())
+
+        neg_correct = int((negLabel_mask & negPred_mask).sum())
+        pos_correct = int((posLabel_mask & posPred_mask).sum())
+
+
+        metrics_dict = {}
+        metrics_dict['loss/all'] = metrics_t[METRICS_LOSS_NDX].mean()
+        metrics_dict['loss/neg'] = metrics_t[METRICS_LOSS_NDX, negLabel_mask].mean()
+        metrics_dict['loss/pos'] = metrics_t[METRICS_LOSS_NDX, posLabel_mask].mean()
+
+        metrics_dict['correct/all'] = (pos_correct + neg_correct) / np.float32(metrics_t.shape[1]) * 100
+        metrics_dict['correct/neg'] = neg_correct / np.float32(neg_count) * 100
+        metrics_dict['correct/pos'] = pos_correct / np.float32(pos_count) * 100
+
+        log.info(("E{}{:8} {loss/neg: .4f} loss," + "{correct/all:-5.1f}% correct,").format(epoch_ndx, model_str, **metrics_dict,))
+        log.info(("E{}{:8} {loss/neg: .4f} loss," + "{correct/neg:-5.1f}% correct ({neg_correct:} of {neg_count:})").format(epoch_ndx, model_str + '_neg', neg_correct=neg_correct, neg_count=neg_count, **metrics_dict,))
+        log.info(("E{}{:8} {loss/pos: .4f} loss," + "{correct/pos:-5.1f}% correct ({pos_correct:} of {pos_count:})").format(epoch_ndx, model_str + '_pos', pos_correct=pos_correct, pos_count=pos_count, **metrics_dict,))
+
+    def main(self):
+        log.info("Starting{}, {}".format(type(self).__name__, self.cli_args))
+        # set data loader
+        train_dl = self.initDataLoader(isValSet_bool=False)
+        val_dl   = self.initDataLoader(isValSet_bool=True)
+
+        for epoch_ndx in range(1, self.cli_args.epochs + 1):
+            # train
+            trainMetrics_t = self.doTraining(epoch_ndx, train_dl)
+            self.logMetrics(epoch_ndx, 'train', trainMetrics_t)
+
+            # validation
+            valMetrics_t = self.doValidation(epoch_ndx, val_dl)
+            self.logMetrics(epoch_ndx, 'validation', valMetrics_t)
+
+
+if __name__ == "__main__":
+    LunaTrainingApp().main()
