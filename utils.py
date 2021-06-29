@@ -2,11 +2,16 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import logging as log
 import time
 import datetime
 from diskcache import FanoutCache, Disk
 from collections import namedtuple
+
+from logconf import logging
+log = logging.getLogger(__name__)
+# log.setLevel(logging.WARN)
+# log.setLevel(logging.INFO)
+log.setLevel(logging.DEBUG)
 
 IrcTuple = namedtuple('IrcTuple', ['index', 'row', 'col'])
 XyzTuple = namedtuple('XyzTuple', ['x', 'y', 'z'])

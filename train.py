@@ -3,7 +3,6 @@
 import sys
 import argparse
 import datetime
-import logging as log
 import numpy as np
 
 import torch
@@ -14,7 +13,11 @@ from torch.utils.data import DataLoader
 from luna_model import LunaModel
 from luna_dataset import LunaDataset
 from utils import enumerateWithEstimate
+from logconf import logging
 
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+log.setLevel(logging.DEBUG)
 
 METRICS_LABEL_NDX = 0
 METRICS_PRED_NDX  = 1
@@ -34,10 +37,11 @@ class LunaTrainingApp:
         parser = argparse.ArgumentParser()
         parser.add_argument('--num-workers', help='Number of worker processes for background data loading', default =  8, type=int,)
         parser.add_argument('--batch-size' , help='Batch size to use for training'                        , default = 32, type=int,)
-        parser.add_argument('--epochs'     , help='Number of epochs to train for'                         , default =  1, type=int,)
+        parser.add_argument('--epochs'     , help='Number of epochs to train for'                         , default = 20, type=int,)
 
         self.cli_args = parser.parse_args(sys_argv)
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
+        self.totalTrainingSamples_count = 0
 
     def initModel(self):
         model = LunaModel()
@@ -71,7 +75,7 @@ class LunaTrainingApp:
             loss_var = self.computeBatchLoss(batch_ndx, batch_tup, train_dl.batch_size, trainMetrics_g)
             loss_var.backward()
             self.optimizer.step()
-        self.toralTrainingSamples_count += len(train_dl.dataset)
+        self.totalTrainingSamples_count += len(train_dl.dataset)
         return trainMetrics_g.to('cpu')
 
     def doValidation(self, epoch_ndx, val_dl):
@@ -134,12 +138,13 @@ class LunaTrainingApp:
         metrics_dict['correct/neg'] = neg_correct / np.float32(neg_count) * 100
         metrics_dict['correct/pos'] = pos_correct / np.float32(pos_count) * 100
 
-        log.info(("E{}{:8} {loss/neg: .4f} loss," + "{correct/all:-5.1f}% correct,").format(epoch_ndx, model_str, **metrics_dict,))
-        log.info(("E{}{:8} {loss/neg: .4f} loss," + "{correct/neg:-5.1f}% correct ({neg_correct:} of {neg_count:})").format(epoch_ndx, model_str + '_neg', neg_correct=neg_correct, neg_count=neg_count, **metrics_dict,))
-        log.info(("E{}{:8} {loss/pos: .4f} loss," + "{correct/pos:-5.1f}% correct ({pos_correct:} of {pos_count:})").format(epoch_ndx, model_str + '_pos', pos_correct=pos_correct, pos_count=pos_count, **metrics_dict,))
+        log.info(("E{}{:8} {loss/neg: .4f} loss," + "{correct/all:-5.1f}% correct,").format(epoch_ndx, mode_str, **metrics_dict,))
+        log.info(("E{}{:8} {loss/neg: .4f} loss," + "{correct/neg:-5.1f}% correct ({neg_correct:} of {neg_count:})").format(epoch_ndx, mode_str + '_neg', neg_correct=neg_correct, neg_count=neg_count, **metrics_dict,))
+        log.info(("E{}{:8} {loss/pos: .4f} loss," + "{correct/pos:-5.1f}% correct ({pos_correct:} of {pos_count:})").format(epoch_ndx, mode_str + '_pos', pos_correct=pos_correct, pos_count=pos_count, **metrics_dict,))
 
     def main(self):
         log.info("Starting{}, {}".format(type(self).__name__, self.cli_args))
+        return
         # set data loader
         train_dl = self.initDataLoader(isValSet_bool=False)
         val_dl   = self.initDataLoader(isValSet_bool=True)

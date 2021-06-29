@@ -27,12 +27,12 @@ dataset_dir = '/home/take/fun/dataset/LUNA'
 # キャッシュの設定
 raw_cache = getCache('part2ch10_raw')
 
-@functools.lru_cache(1, typed=True)
+#@functools.lru_cache(1, typed=True)
 def getCt(series_uid):
     return Ct(series_uid)
 
 # cacheを使う。
-@functools.lru_cache(1)
+#@functools.lru_cache(1)
 def getCandidateInfoList(requireOnDisk_bool=True):
 
 
