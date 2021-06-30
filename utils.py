@@ -4,7 +4,12 @@
 import numpy as np
 import time
 import datetime
-from diskcache import FanoutCache, Disk
+from cassandra.cqltypes import BytesType
+from diskcache import FanoutCache, Disk,core
+from diskcache.core import io
+from io import BytesIO
+from diskcache.core import MODE_BINARY
+
 from collections import namedtuple
 
 from logconf import logging

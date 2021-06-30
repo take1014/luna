@@ -15,6 +15,10 @@ from utils import XyzTuple, xyz2irc, getCache
 
 import torch
 import torch.utils.data as data
+from logconf import logging
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
 
 # CandidateListは辞書型変数
 CandidateInfoTuple = namedtuple(
@@ -25,14 +29,14 @@ CandidateInfoTuple = namedtuple(
 dataset_dir = '/home/take/fun/dataset/LUNA'
 
 # キャッシュの設定
-raw_cache = getCache('part2ch10_raw')
+raw_cache = getCache('part2ch11_raw')
 
-#@functools.lru_cache(1, typed=True)
+@functools.lru_cache(1, typed=True)
 def getCt(series_uid):
     return Ct(series_uid)
 
 # cacheを使う。
-#@functools.lru_cache(1)
+@functools.lru_cache(1)
 def getCandidateInfoList(requireOnDisk_bool=True):
 
 
@@ -133,10 +137,13 @@ class Ct:
         ct_chunk = self.hu_a[tuple(slice_list)]
         return ct_chunk, center_irc
 
+
 @functools.lru_cache(1, typed=True)
 def getCt(series_uid):
     return Ct(series_uid)
 
+
+@raw_cache.memoize(typed=True)
 def getCtRawCandidate(series_uid, center_xyz, width_irc):
     ct = getCt(series_uid)
     return ct.getRawCandidate(center_xyz, width_irc)
@@ -156,6 +163,9 @@ class LunaDataset(data.Dataset):
         elif val_stride > 0:
             del self.candidateInfo_list[::val_stride]
             assert self.candidateInfo_list
+
+        log.info("{!r}: {} {} samples".format( self, len(self.candidateInfo_list),
+                                               "validation" if isValSet_bool else "training", ))
 
     def __len__(self):
         return len(self.candidateInfo_list)
