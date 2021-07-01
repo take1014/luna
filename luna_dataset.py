@@ -109,12 +109,14 @@ class Ct:
         ct_a.clip(-1000, 1000, ct_a)
 
         self.series_uid = series_uid
+        # hu_a: ct image
         self.hu_a = ct_a
         self.origin_xyz = XyzTuple(*ct_mhd.GetOrigin())
         self.vxSize_xyz = XyzTuple(*ct_mhd.GetSpacing())
         self.direction_a = np.array(ct_mhd.GetDirection()).reshape(3, 3)
 
     def getRawCandidate(self, center_xyz, width_irc):
+
         center_irc = xyz2irc( center_xyz, self.origin_xyz,
                               self.vxSize_xyz, self.direction_a )
         slice_list = []
@@ -174,6 +176,8 @@ class LunaDataset(data.Dataset):
         candidateInfo_tup = self.candidateInfo_list[ndx]
         width_irc = (32, 48, 48)
 
+        # candidate_a: ct image
+        # center_irc : axis
         candidate_a, center_irc = getCtRawCandidate(
                                         candidateInfo_tup.series_uid,
                                         candidateInfo_tup.center_xyz,
@@ -186,8 +190,9 @@ class LunaDataset(data.Dataset):
         candidate_t = candidate_t.unsqueeze(0)
 
         pos_t = torch.tensor([
-                        not candidateInfo_tup.isNodule_bool,
-                        candidateInfo_tup.isNodule_bool], dtype=torch.long)
+                        not candidateInfo_tup.isNodule_bool,                # クラス定義  結節:0, 結節でない:1
+                        candidateInfo_tup.isNodule_bool], dtype=torch.long) # 陽性:1, 陰性:0
+
         return candidate_t, pos_t, candidateInfo_tup.series_uid, torch.tensor(center_irc)
 
 

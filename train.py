@@ -74,6 +74,8 @@ class LunaTrainingApp:
     def doTraining(self, epoch_ndx, train_dl):
         # Change training mode
         self.model.train()
+
+        # Metricsの初期化
         trainMetrics_g = torch.zeros(METRICS_SIZE, len(train_dl.dataset), device=self.device)
 
         batch_iter = enumerateWithEstimate(train_dl, 'E{} Training'.format(epoch_ndx), start_ndx=train_dl.num_workers,)
@@ -90,6 +92,8 @@ class LunaTrainingApp:
         # Change training mode
         with torch.no_grad():
             self.model.eval()
+
+            # Metricsの初期化
             valMetrics_g = torch.zeros(METRICS_SIZE, len(val_dl.dataset), device=self.device)
 
             batch_iter = enumerateWithEstimate(val_dl, 'E{} Validation'.format(epoch_ndx), start_ndx=val_dl.num_workers,)
@@ -114,8 +118,9 @@ class LunaTrainingApp:
         loss_g    = loss_func(logits_g, label_g[:,1],)
 
         start_ndx = batch_ndx * batch_size
-        end_ndx   = start_ndx + label_t.size(0)
+        end_ndx   = start_ndx + label_t.size(0) # label_t.size(0) = batch_size
 
+        # Metricsの更新
         metrics_g[METRICS_LABEL_NDX, start_ndx:end_ndx] = label_g[:,1].detach()
         metrics_g[METRICS_PRED_NDX , start_ndx:end_ndx] = probability_g[:,1].detach()
         metrics_g[METRICS_LOSS_NDX , start_ndx:end_ndx] = loss_g.detach()
@@ -137,9 +142,11 @@ class LunaTrainingApp:
         neg_count = int(negLabel_mask.sum())
         pos_count = int(posLabel_mask.sum())
 
-        neg_correct = int((negLabel_mask & negPred_mask).sum())
-        pos_correct = int((posLabel_mask & posPred_mask).sum())
+        trueNeg_count = neg_correct = int((negLabel_mask & negPred_mask).sum())
+        truePos_count = pos_correct = int((posLabel_mask & posPred_mask).sum())
 
+        falsePos_count = neg_count - neg_correct
+        falseNeg_count = pos_count - pos_correct
 
         metrics_dict = {}
         metrics_dict['loss/all'] = metrics_t[METRICS_LOSS_NDX].mean()
@@ -149,10 +156,22 @@ class LunaTrainingApp:
         metrics_dict['correct/all'] = (pos_correct + neg_correct) / np.float32(metrics_t.shape[1]) * 100
         metrics_dict['correct/neg'] = neg_correct / np.float32(neg_count) * 100
         metrics_dict['correct/pos'] = pos_correct / np.float32(pos_count) * 100
+        precision = metrics_dict['pr/precision'] = truePos_count / np.float32(truePos_count + falsePos_count)
+        recall    = metrics_dict['pr/recall']    = truePos_count / np.float32(truePos_count + falseNeg_count)
 
-        log.info(('E{}{:8} {loss/all: .4f} loss,' + '{correct/all:-5.1f}% correct,').format(epoch_ndx, mode_str, **metrics_dict,))
-        log.info(('E{}{:8} {loss/neg: .4f} loss,' + '{correct/neg:-5.1f}% correct ({neg_correct:} of {neg_count:})').format(epoch_ndx, mode_str + '_neg', neg_correct=neg_correct, neg_count=neg_count, **metrics_dict,))
-        log.info(('E{}{:8} {loss/pos: .4f} loss,' + '{correct/pos:-5.1f}% correct ({pos_correct:} of {pos_count:})').format(epoch_ndx, mode_str + '_pos', pos_correct=pos_correct, pos_count=pos_count, **metrics_dict,))
+        # F1 Score
+        metrics_dict['pr/f1_score'] = 2 * precision * recall / (precision + recall)
+
+        # logger
+        log.info(("E{} {:8} {loss/all:.4f} loss, "
+                 + "{correct/all:-5.1f}% correct, "
+                 + "{pr/precision:.4f} precision, "
+                 + "{pr/recall:.4f} recall, "
+                 + "{pr/f1_score:.4f} f1 score").format(epoch_ndx, mode_str, **metrics_dict,) )
+        log.info(("E{} {:8} {loss/neg:.4f} loss, "
+                 + "{correct/neg:-5.1f}% correct ({neg_correct:} of {neg_count:})").format(epoch_ndx, mode_str + '_neg', neg_correct=neg_correct, neg_count=neg_count, **metrics_dict,))
+        log.info(("E{} {:8} {loss/pos:.4f} loss, "+ "{correct/pos:-5.1f}% correct ({pos_correct:} of {pos_count:})"
+                 ).format(epoch_ndx, mode_str + '_pos', pos_correct=pos_correct, pos_count=pos_count, **metrics_dict,))
 
         writer = getattr(self, mode_str + '_writer')
 
