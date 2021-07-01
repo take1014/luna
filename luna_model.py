@@ -57,7 +57,7 @@ class LunaModel(nn.Module):
     def _init_weights(self):
         for m in self.modules():
             if type(m) in { nn.Linear, nn.Conv3d, nn.Conv2d,
-                            nn.ConvTranspose2d, nn.ConvTranspose3d,}:
+                            nn.ConvTranspose2d, nn.ConvTranspose3d, }:
                 nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_out', nonlinearity='relu')
                 if m.bias is not None:
                     fan_in, fan_out = nn.init._calculate_fan_in_and_fan_out(m.weight.data)

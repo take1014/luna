@@ -24,26 +24,27 @@ log.setLevel(logging.DEBUG)
 METRICS_LABEL_NDX = 0
 METRICS_PRED_NDX  = 1
 METRICS_LOSS_NDX  = 2
-METRICS_SIZE = 3
+METRICS_SIZE      = 3
 
 class LunaTrainingApp:
     def __init__(self, sys_argv=None):
         self.use_cuda  = torch.cuda.is_available()
-        self.device    = torch.device("cuda" if self.use_cuda else "cpu")
+        self.device    = torch.device('cuda' if self.use_cuda else 'cpu')
         if sys_argv is None:
             # get command line string
             sys_argv = sys.argv[1:]
         parser = argparse.ArgumentParser()
-        parser.add_argument('--num-workers', help='Number of worker processes for background data loading'      , default =  8, type=int,)
-        parser.add_argument('--batch-size' , help='Batch size to use for training'                              , default = 32, type=int,)
-        parser.add_argument('--epochs'     , help='Number of epochs to train for'                               , default = 20, type=int,)
-        parser.add_argument('--tb-prefix'  , help="Data prefix to use for Tensorboard run. Defaults to chapter.", default='p2ch11',)
-        parser.add_argument('comment'      , help="Comment suffix for Tensorboard run."                         , default='dwlpt', nargs='?',)
+        parser.add_argument('--num-workers', help='Number of worker processes for background data loading'      , default =  8      , type=int,)
+        parser.add_argument('--batch-size' , help='Batch size to use for training'                              , default = 32      , type=int,)
+        parser.add_argument('--epochs'     , help='Number of epochs to train for'                               , default = 20      , type=int,)
+        parser.add_argument('--tb-prefix'  , help='Data prefix to use for Tensorboard run. Defaults to chapter.', default = 'p2ch11', type=str,)
+        parser.add_argument('comment'      , help='Comment suffix for Tensorboard run.'                         , default = 'dwlpt' , nargs='?',)
 
+        # Analyze argument
         self.cli_args = parser.parse_args(sys_argv)
         self.time_str = datetime.datetime.now().strftime('%Y-%m-%d_%H.%M.%S')
 
-        self.trn_writer = None
+        self.train_writer = None
         self.val_writer = None
         self.totalTrainingSamples_count = 0
 
@@ -53,7 +54,7 @@ class LunaTrainingApp:
     def initModel(self):
         model = LunaModel()
         if self.use_cuda:
-            log.info("Using CUDA; {} devices".format(torch.cuda.device_count()))
+            log.info('Using CUDA; {} devices'.format(torch.cuda.device_count()))
             if torch.cuda.device_count() > 1:
                 model = nn.DataParallel(model)
             model = model.to(self.device)
@@ -64,8 +65,8 @@ class LunaTrainingApp:
         batch_size = self.cli_args.batch_size
         if self.use_cuda:
             batch_size *= torch.cuda.device_count()
-        dl = DataLoader(ds, batch_size=batch_size, num_workers=self.cli_args.num_workers, pin_memory=self.use_cuda,)
-        return dl
+
+        return DataLoader(ds, batch_size=batch_size, num_workers=self.cli_args.num_workers, pin_memory=self.use_cuda,)
 
     def initOptimizer(self):
         return optim.SGD(self.model.parameters(), lr = 0.001, momentum=0.99)
@@ -75,7 +76,7 @@ class LunaTrainingApp:
         self.model.train()
         trainMetrics_g = torch.zeros(METRICS_SIZE, len(train_dl.dataset), device=self.device)
 
-        batch_iter = enumerateWithEstimate(train_dl, "E{} Training".format(epoch_ndx), start_ndx=train_dl.num_workers,)
+        batch_iter = enumerateWithEstimate(train_dl, 'E{} Training'.format(epoch_ndx), start_ndx=train_dl.num_workers,)
 
         for batch_ndx, batch_tup in batch_iter:
             self.optimizer.zero_grad()
@@ -91,7 +92,7 @@ class LunaTrainingApp:
             self.model.eval()
             valMetrics_g = torch.zeros(METRICS_SIZE, len(val_dl.dataset), device=self.device)
 
-            batch_iter = enumerateWithEstimate(val_dl, "E{} Validation".format(epoch_ndx), start_ndx=val_dl.num_workers,)
+            batch_iter = enumerateWithEstimate(val_dl, 'E{} Validation'.format(epoch_ndx), start_ndx=val_dl.num_workers,)
 
             # Validationなので推論のみ。ロスの計算と逆伝搬は行わない
             for batch_ndx, batch_tup in batch_iter:
@@ -125,7 +126,7 @@ class LunaTrainingApp:
     def logMetrics(self, epoch_ndx, mode_str, metrics_t, classificationThreshold=0.5):
         self.initTensorboardWriters()
 
-        log.info("E{} {}".format( epoch_ndx, type(self).__name__, ))
+        log.info('E{} {}'.format( epoch_ndx, type(self).__name__, ))
 
         negLabel_mask = metrics_t[METRICS_LABEL_NDX] <= classificationThreshold
         negPred_mask  = metrics_t[METRICS_PRED_NDX]  <= classificationThreshold
@@ -149,9 +150,9 @@ class LunaTrainingApp:
         metrics_dict['correct/neg'] = neg_correct / np.float32(neg_count) * 100
         metrics_dict['correct/pos'] = pos_correct / np.float32(pos_count) * 100
 
-        log.info(("E{}{:8} {loss/all: .4f} loss," + "{correct/all:-5.1f}% correct,").format(epoch_ndx, mode_str, **metrics_dict,))
-        log.info(("E{}{:8} {loss/neg: .4f} loss," + "{correct/neg:-5.1f}% correct ({neg_correct:} of {neg_count:})").format(epoch_ndx, mode_str + '_neg', neg_correct=neg_correct, neg_count=neg_count, **metrics_dict,))
-        log.info(("E{}{:8} {loss/pos: .4f} loss," + "{correct/pos:-5.1f}% correct ({pos_correct:} of {pos_count:})").format(epoch_ndx, mode_str + '_pos', pos_correct=pos_correct, pos_count=pos_count, **metrics_dict,))
+        log.info(('E{}{:8} {loss/all: .4f} loss,' + '{correct/all:-5.1f}% correct,').format(epoch_ndx, mode_str, **metrics_dict,))
+        log.info(('E{}{:8} {loss/neg: .4f} loss,' + '{correct/neg:-5.1f}% correct ({neg_correct:} of {neg_count:})').format(epoch_ndx, mode_str + '_neg', neg_correct=neg_correct, neg_count=neg_count, **metrics_dict,))
+        log.info(('E{}{:8} {loss/pos: .4f} loss,' + '{correct/pos:-5.1f}% correct ({pos_correct:} of {pos_count:})').format(epoch_ndx, mode_str + '_pos', pos_correct=pos_correct, pos_count=pos_count, **metrics_dict,))
 
         writer = getattr(self, mode_str + '_writer')
 
@@ -174,22 +175,22 @@ class LunaTrainingApp:
 
     # Tensorboard writers
     def initTensorboardWriters(self):
-        if self.trn_writer is None:
+        if self.train_writer is None:
             log_dir = os.path.join('runs', self.cli_args.tb_prefix, self.time_str)
 
-            self.trn_writer = SummaryWriter(
+            self.train_writer = SummaryWriter(
                 log_dir=log_dir + '-trn_cls-' + self.cli_args.comment)
             self.val_writer = SummaryWriter(
                 log_dir=log_dir + '-val_cls-' + self.cli_args.comment)
 
     def main(self):
-        log.info("Starting{}, {}".format(type(self).__name__, self.cli_args))
+        log.info('Starting{}, {}'.format(type(self).__name__, self.cli_args))
         # set data loader
         train_dl = self.initDataLoader(isValSet_bool=False)
         val_dl   = self.initDataLoader(isValSet_bool=True)
 
         for epoch_ndx in range(1, self.cli_args.epochs + 1):
-            log.info("Epoch {} of {}, {}/{} batches of size {}*{}".format(
+            log.info('Epoch {} of {}, {}/{} batches of size {}*{}'.format(
                 epoch_ndx,
                 self.cli_args.epochs,
                 len(train_dl),
@@ -203,10 +204,10 @@ class LunaTrainingApp:
 
             # validation
             valMetrics_t = self.doValidation(epoch_ndx, val_dl)
-            self.logMetrics(epoch_ndx, 'validation', valMetrics_t)
-            if hasattr(self, 'trn_writer'):
-                self.trn_writer.close()
+            self.logMetrics(epoch_ndx, 'val', valMetrics_t)
+            if hasattr(self, 'train_writer'):
+                self.train_writer.close()
                 self.val_writer.close()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     LunaTrainingApp().main()
